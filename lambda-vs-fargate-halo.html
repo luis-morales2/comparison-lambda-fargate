@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lambda vs Fargate — Ask Halo Architecture</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --blue:   #0A84FF;
+    --purple: #BF5AF2;
+    --teal:   #32D74B;
+    --amber:  #FF9F0A;
+    --red:    #FF453A;
+    --glass-bg: rgba(255,255,255,0.06);
+    --glass-border: rgba(255,255,255,0.12);
+    --glass-hover: rgba(255,255,255,0.10);
+    --text-primary: rgba(255,255,255,0.95);
+    --text-secondary: rgba(255,255,255,0.55);
+    --text-tertiary: rgba(255,255,255,0.30);
+  }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #000;
+    color: var(--text-primary);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  .bg {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    background: radial-gradient(ellipse 80% 60% at 20% 10%, rgba(10,132,255,0.18) 0%, transparent 60%),
+                radial-gradient(ellipse 60% 50% at 80% 80%, rgba(191,90,242,0.14) 0%, transparent 60%),
+                radial-gradient(ellipse 50% 40% at 50% 50%, rgba(50,215,75,0.05) 0%, transparent 60%),
+                linear-gradient(160deg, #0a0a12 0%, #06060e 50%, #0a0212 100%);
+  }
+
+  .bg-grain {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    opacity: 0.025;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+    pointer-events: none;
+  }
+
+  .page { position: relative; z-index: 2; max-width: 1100px; margin: 0 auto; padding: 0 2rem 6rem; }
+
+  /* HEADER */
+  header { padding: 4rem 0 3rem; }
+  .eyebrow { font-size: 11px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--blue); margin-bottom: 1rem; }
+  h1 { font-size: clamp(32px, 5vw, 52px); font-weight: 300; letter-spacing: -0.03em; line-height: 1.1; color: var(--text-primary); }
+  h1 span { font-weight: 600; }
+  .subtitle { margin-top: 1rem; font-size: 16px; color: var(--text-secondary); font-weight: 300; max-width: 520px; line-height: 1.6; }
+
+  /* GLASS CARD */
+  .glass {
+    background: var(--glass-bg);
+    border: 0.5px solid var(--glass-border);
+    border-radius: 20px;
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    transition: background 200ms;
+  }
+  .glass:hover { background: var(--glass-hover); }
+
+  /* STAT STRIP */
+  .stat-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 2rem; }
+
+  .stat-card { padding: 1.25rem 1.5rem; border-radius: 16px; background: var(--glass-bg); border: 0.5px solid var(--glass-border); backdrop-filter: blur(24px); }
+  .stat-card .label { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-tertiary); margin-bottom: 0.5rem; }
+  .stat-card .val { font-size: 22px; font-weight: 500; color: var(--text-primary); font-family: 'JetBrains Mono', monospace; }
+  .stat-card .sub { font-size: 12px; color: var(--text-secondary); margin-top: 0.25rem; }
+
+  /* TAB BAR */
+  .tab-bar { display: flex; gap: 4px; background: rgba(255,255,255,0.04); border: 0.5px solid var(--glass-border); border-radius: 14px; padding: 4px; margin-bottom: 2rem; backdrop-filter: blur(20px); width: fit-content; }
+  .tab { padding: 8px 20px; border-radius: 10px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; background: transparent; color: var(--text-secondary); transition: all 180ms; }
+  .tab.active { background: rgba(255,255,255,0.10); color: var(--text-primary); border: 0.5px solid var(--glass-border); }
+  .tab:hover:not(.active) { color: var(--text-primary); }
+
+  /* SECTIONS */
+  .section { display: none; }
+  .section.active { display: block; animation: fadeUp 240ms ease; }
+
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+  /* GRID 2 COL */
+  .col2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+  /* OPTION CARD */
+  .option-card { padding: 2rem; border-radius: 20px; background: var(--glass-bg); border: 0.5px solid var(--glass-border); backdrop-filter: blur(24px); }
+  .option-header { display: flex; align-items: center; gap: 12px; margin-bottom: 1.5rem; }
+  .option-icon { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+  .option-icon.lambda-icon { background: rgba(10,132,255,0.15); border: 0.5px solid rgba(10,132,255,0.3); }
+  .option-icon.fargate-icon { background: rgba(255,159,10,0.15); border: 0.5px solid rgba(255,159,10,0.3); }
+  .option-name { font-size: 18px; font-weight: 500; }
+  .option-tag { font-size: 11px; font-weight: 500; letter-spacing: 0.06em; padding: 3px 10px; border-radius: 20px; margin-top: 3px; width: fit-content; }
+  .tag-lambda { background: rgba(10,132,255,0.15); color: var(--blue); }
+  .tag-fargate { background: rgba(255,159,10,0.15); color: var(--amber); }
+
+  /* ROW METRIC */
+  .row { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 0; border-bottom: 0.5px solid rgba(255,255,255,0.06); }
+  .row:last-child { border-bottom: none; }
+  .row-label { font-size: 13px; color: var(--text-secondary); }
+  .row-value { font-size: 14px; font-weight: 500; font-family: 'JetBrains Mono', monospace; }
+  .val-blue { color: var(--blue); }
+  .val-amber { color: var(--amber); }
+  .val-green { color: var(--teal); }
+  .val-red { color: var(--red); }
+
+  /* DIVIDER */
+  .divider { height: 0.5px; background: var(--glass-border); margin: 1.5rem 0; }
+
+  /* TABLE */
+  .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .data-table thead tr { border-bottom: 0.5px solid rgba(255,255,255,0.1); }
+  .data-table th { padding: 12px 16px; text-align: left; font-size: 11px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-tertiary); }
+  .data-table td { padding: 14px 16px; border-bottom: 0.5px solid rgba(255,255,255,0.04); vertical-align: top; }
+  .data-table tbody tr:hover td { background: rgba(255,255,255,0.03); }
+  .data-table td.col-label { color: var(--text-secondary); font-weight: 400; }
+  .data-table td.col-lambda { color: var(--blue); font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+  .data-table td.col-fargate { color: var(--amber); font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+  .data-table td.col-note { color: var(--text-tertiary); font-size: 12px; line-height: 1.5; }
+
+  /* COST BARS */
+  .bar-wrap { margin: 1.5rem 0; display: flex; flex-direction: column; gap: 1rem; }
+  .bar-row { display: flex; align-items: center; gap: 16px; }
+  .bar-name { font-size: 13px; color: var(--text-secondary); width: 160px; flex-shrink: 0; }
+  .bar-track { flex: 1; height: 36px; background: rgba(255,255,255,0.04); border-radius: 8px; overflow: hidden; position: relative; border: 0.5px solid rgba(255,255,255,0.06); }
+  .bar-fill { height: 100%; border-radius: 8px; display: flex; align-items: center; padding: 0 12px; font-size: 12px; font-weight: 500; font-family: 'JetBrains Mono', monospace; transition: width 800ms cubic-bezier(0.23, 1, 0.32, 1); }
+  .fill-lambda { background: rgba(10,132,255,0.22); color: var(--blue); border: 0.5px solid rgba(10,132,255,0.3); }
+  .fill-fargate { background: rgba(255,159,10,0.18); color: var(--amber); border: 0.5px solid rgba(255,159,10,0.25); }
+  .bar-dollar { font-size: 13px; font-family: 'JetBrains Mono', monospace; color: var(--text-primary); width: 60px; text-align: right; flex-shrink: 0; }
+
+  /* TIMELINE */
+  .timeline { margin: 1.5rem 0; display: flex; flex-direction: column; gap: 8px; }
+  .tl-row { display: flex; align-items: center; gap: 12px; font-size: 12px; }
+  .tl-label { color: var(--text-secondary); width: 180px; flex-shrink: 0; }
+  .tl-track { flex: 1; height: 28px; background: rgba(255,255,255,0.04); border-radius: 6px; position: relative; overflow: hidden; }
+  .tl-seg { position: absolute; top: 0; height: 100%; border-radius: 6px; display: flex; align-items: center; padding: 0 8px; font-size: 11px; font-weight: 500; font-family: 'JetBrains Mono', monospace; }
+  .tl-hard { position: absolute; right: 0; top: -2px; bottom: -2px; width: 2px; background: var(--red); z-index: 10; }
+  .tl-hard-label { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); font-size: 10px; color: var(--red); font-weight: 500; font-family: 'JetBrains Mono', monospace; }
+  .tl-total { color: var(--text-tertiary); font-family: 'JetBrains Mono', monospace; width: 60px; text-align: right; flex-shrink: 0; }
+
+  /* PILL */
+  .pill { display: inline-block; font-size: 11px; font-weight: 500; padding: 3px 10px; border-radius: 20px; }
+  .pill-blue { background: rgba(10,132,255,0.15); color: var(--blue); }
+  .pill-amber { background: rgba(255,159,10,0.15); color: var(--amber); }
+  .pill-red { background: rgba(255,69,58,0.15); color: var(--red); }
+  .pill-green { background: rgba(50,215,75,0.15); color: var(--teal); }
+
+  /* SECTION TITLE */
+  .section-label { font-size: 11px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-tertiary); margin-bottom: 1.25rem; }
+
+  /* FOOTER */
+  footer { margin-top: 4rem; padding-top: 2rem; border-top: 0.5px solid rgba(255,255,255,0.06); display: flex; justify-content: space-between; align-items: center; }
+  footer p { font-size: 12px; color: var(--text-tertiary); }
+
+  /* RESPONSIVE */
+  @media (max-width: 700px) {
+    .stat-strip { grid-template-columns: 1fr 1fr; }
+    .col2 { grid-template-columns: 1fr; }
+    .tab-bar { overflow-x: auto; width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<div class="bg"></div>
+<div class="bg-grain"></div>
+
+<div class="page">
+
+  <header>
+    <p class="eyebrow">Ask Halo · AWS Architecture</p>
+    <h1><span>Lambda</span> vs <span>Fargate</span></h1>
+    <p class="subtitle">Hard data comparison. Compute options for ingestion pipeline and query router. Ask Halo, OpenAI → Amazon Bedrock migration.</p>
+  </header>
+
+  <div class="stat-strip">
+    <div class="stat-card">
+      <div class="label">API GW Hard Timeout</div>
+      <div class="val">29 sec</div>
+      <div class="sub">Synchronous constraint</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Lambda cold start</div>
+      <div class="val">1–2 sec</div>
+      <div class="sub">Python 3.x runtime</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Fargate cold start</div>
+      <div class="val">15–30 sec</div>
+      <div class="sub">Container pull + init</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Cost delta</div>
+      <div class="val">6×</div>
+      <div class="sub">Fargate vs Lambda/mo</div>
+    </div>
+  </div>
+
+  <div class="tab-bar">
+    <button class="tab active" onclick="switchTab('specs')">Specs</button>
+    <button class="tab" onclick="switchTab('costs')">Costs</button>
+    <button class="tab" onclick="switchTab('latency')">Latency budget</button>
+    <button class="tab" onclick="switchTab('components')">By component</button>
+  </div>
+
+  <!-- SPECS -->
+  <div id="specs" class="section active">
+    <div class="col2">
+
+      <div class="option-card">
+        <div class="option-header">
+          <div class="option-icon lambda-icon">λ</div>
+          <div>
+            <div class="option-name">AWS Lambda</div>
+            <div class="option-tag tag-lambda">Serverless function</div>
+          </div>
+        </div>
+        <div class="row"><span class="row-label">Cold start (Python)</span><span class="row-value val-blue">1–2 sec</span></div>
+        <div class="row"><span class="row-label">Warm execution</span><span class="row-value val-blue">100–500 ms</span></div>
+        <div class="row"><span class="row-label">Max timeout</span><span class="row-value val-blue">900 sec (15 min)</span></div>
+        <div class="row"><span class="row-label">Memory range</span><span class="row-value val-blue">128 MB – 10 GB</span></div>
+        <div class="row"><span class="row-label">Ephemeral storage</span><span class="row-value val-blue">512 MB (/tmp)</span></div>
+        <div class="row"><span class="row-label">Default concurrency</span><span class="row-value val-blue">1,000 invocations</span></div>
+        <div class="row"><span class="row-label">Request payload limit</span><span class="row-value val-blue">6 MB</span></div>
+        <div class="row"><span class="row-label">Response payload limit</span><span class="row-value val-blue">6 MB</span></div>
+        <div class="row"><span class="row-label">Container support</span><span class="row-value val-blue">Custom runtimes only</span></div>
+        <div class="row"><span class="row-label">API GW integration</span><span class="row-value val-blue">Native</span></div>
+        <div class="row"><span class="row-label">Pricing model</span><span class="row-value val-blue">Per 100ms + GB-sec</span></div>
+        <div class="row"><span class="row-label">Idle cost</span><span class="row-value val-blue">$0.00</span></div>
+        <div class="row"><span class="row-label">IaC complexity</span><span class="row-value val-blue">~80 lines CFN</span></div>
+      </div>
+
+      <div class="option-card">
+        <div class="option-header">
+          <div class="option-icon fargate-icon">⬡</div>
+          <div>
+            <div class="option-name">AWS Fargate</div>
+            <div class="option-tag tag-fargate">Serverless container</div>
+          </div>
+        </div>
+        <div class="row"><span class="row-label">Cold start (container pull)</span><span class="row-value val-amber">15–30 sec</span></div>
+        <div class="row"><span class="row-label">Warm execution</span><span class="row-value val-amber">50–200 ms</span></div>
+        <div class="row"><span class="row-label">Max timeout</span><span class="row-value val-amber">Unlimited</span></div>
+        <div class="row"><span class="row-label">Memory range</span><span class="row-value val-amber">512 MB – 30 GB</span></div>
+        <div class="row"><span class="row-label">Ephemeral storage</span><span class="row-value val-amber">20 GB</span></div>
+        <div class="row"><span class="row-label">Default concurrency</span><span class="row-value val-amber">Limited by vCPU</span></div>
+        <div class="row"><span class="row-label">Request payload limit</span><span class="row-value val-amber">None (HTTP)</span></div>
+        <div class="row"><span class="row-label">Response payload limit</span><span class="row-value val-amber">None (HTTP)</span></div>
+        <div class="row"><span class="row-label">Container support</span><span class="row-value val-amber">Full Docker</span></div>
+        <div class="row"><span class="row-label">API GW integration</span><span class="row-value val-amber">Via ALB/NLB</span></div>
+        <div class="row"><span class="row-label">Pricing model</span><span class="row-value val-amber">vCPU-sec + GB-sec</span></div>
+        <div class="row"><span class="row-label">Idle cost (always-on)</span><span class="row-value val-amber">~$90/month</span></div>
+        <div class="row"><span class="row-label">IaC complexity</span><span class="row-value val-amber">~500+ lines CFN</span></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- COSTS -->
+  <div id="costs" class="section">
+    <p class="section-label">Monthly cost estimate — Ask Halo at ~100K queries/month</p>
+
+    <div class="glass" style="padding: 2rem; margin-bottom: 1.5rem;">
+      <p class="section-label">Component breakdown</p>
+      <div class="bar-wrap">
+        <div class="bar-row">
+          <div class="bar-name">Lambda — total</div>
+          <div class="bar-track">
+            <div class="bar-fill fill-lambda" style="width: 17%;">$30 / mo</div>
+          </div>
+          <div class="bar-dollar val-blue">$30</div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-name">Fargate — always-on</div>
+          <div class="bar-track">
+            <div class="bar-fill fill-fargate" style="width: 100%;">$180 / mo (if always running)</div>
+          </div>
+          <div class="bar-dollar val-amber">$180</div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-name">Fargate — batch only</div>
+          <div class="bar-track">
+            <div class="bar-fill fill-fargate" style="width: 22%;">$40 / mo</div>
+          </div>
+          <div class="bar-dollar val-amber">$40</div>
+        </div>
+      </div>
+      <p style="font-size: 12px; color: var(--text-tertiary); margin-top: 1rem;">* Fargate "always-on" required for sync query router to avoid cold start breaking 29-sec SLA. Fargate "batch only" = ingestion pipeline only, shuts down after completion.</p>
+    </div>
+
+    <div class="glass" style="padding: 2rem;">
+      <p class="section-label">Per-component cost table</p>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>Invocations</th>
+            <th>Lambda / mo</th>
+            <th>Fargate / mo</th>
+            <th>Fargate mode</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="col-label">Query Router</td>
+            <td style="color: var(--text-secondary); font-family: 'JetBrains Mono', monospace; font-size: 12px;">100K / mo<br><span style="color: var(--text-tertiary);">~0.04 QPS avg</span></td>
+            <td class="col-lambda">$20 / mo<br><span style="color: var(--text-tertiary);">3 GB × 100K × 3s</span></td>
+            <td class="col-fargate">$90 / mo<br><span style="color: var(--text-tertiary);">2 vCPU × 730h (idle)</span></td>
+            <td class="col-note">Must stay always-on<br>Cold start = 504 timeout</td>
+          </tr>
+          <tr>
+            <td class="col-label">Chunk / Embed / Index</td>
+            <td style="color: var(--text-secondary); font-family: 'JetBrains Mono', monospace; font-size: 12px;">1× daily<br><span style="color: var(--text-tertiary);">~30 runs / mo</span></td>
+            <td class="col-lambda">$5 / mo<br><span style="color: var(--text-tertiary);">8 GB × 10 min × 30</span></td>
+            <td class="col-fargate">$20 / mo<br><span style="color: var(--text-tertiary);">2 vCPU × 10 min × 30</span></td>
+            <td class="col-note">Task-on-demand OK<br>No SLA pressure</td>
+          </tr>
+          <tr>
+            <td class="col-label">Feedback endpoint</td>
+            <td style="color: var(--text-secondary); font-family: 'JetBrains Mono', monospace; font-size: 12px;">~20K / mo</td>
+            <td class="col-lambda">$1 / mo</td>
+            <td class="col-fargate">Included in always-on</td>
+            <td class="col-note">Negligible volume</td>
+          </tr>
+          <tr>
+            <td class="col-label">Suggested Qs endpoint</td>
+            <td style="color: var(--text-secondary); font-family: 'JetBrains Mono', monospace; font-size: 12px;">~30K / mo</td>
+            <td class="col-lambda">$2 / mo</td>
+            <td class="col-fargate">Included in always-on</td>
+            <td class="col-note">DynamoDB reads</td>
+          </tr>
+          <tr style="border-top: 0.5px solid rgba(255,255,255,0.1);">
+            <td class="col-label" style="font-weight: 500; color: var(--text-primary);">Total (Option 1 — Lambda)</td>
+            <td></td>
+            <td class="col-lambda" style="font-size: 14px; font-weight: 500;">$28 / mo</td>
+            <td></td>
+            <td></td>
+          </tr>
+          <tr>
+            <td class="col-label" style="font-weight: 500; color: var(--text-primary);">Total (Option 2 — Fargate all)</td>
+            <td></td>
+            <td></td>
+            <td class="col-fargate" style="font-size: 14px; font-weight: 500;">$180 / mo</td>
+            <td></td>
+          </tr>
+          <tr>
+            <td class="col-label" style="font-weight: 500; color: var(--text-primary);">Total (Hybrid — Fargate batch + Lambda sync)</td>
+            <td></td>
+            <td></td>
+            <td class="col-fargate" style="font-size: 14px; font-weight: 500;">$43 / mo</td>
+            <td class="col-note">Fargate: ingestion only<br>Lambda: queries + endpoints</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="divider"></div>
+      <p class="section-label">Pricing rates (as of 2025)</p>
+      <table class="data-table">
+        <thead>
+          <tr><th>Service</th><th>Rate</th><th>Unit</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="col-label">Lambda invocation</td>
+            <td class="col-lambda">$0.0000002</td>
+            <td style="font-size: 12px; color: var(--text-tertiary);">per request</td>
+          </tr>
+          <tr>
+            <td class="col-label">Lambda duration</td>
+            <td class="col-lambda">$0.0000166667</td>
+            <td style="font-size: 12px; color: var(--text-tertiary);">per GB-second</td>
+          </tr>
+          <tr>
+            <td class="col-label">Fargate vCPU</td>
+            <td class="col-fargate">$0.05233</td>
+            <td style="font-size: 12px; color: var(--text-tertiary);">per vCPU-hour</td>
+          </tr>
+          <tr>
+            <td class="col-label">Fargate memory</td>
+            <td class="col-fargate">$0.00586</td>
+            <td style="font-size: 12px; color: var(--text-tertiary);">per GB-hour</td>
+          </tr>
+          <tr>
+            <td class="col-label">Fargate Spot (discount)</td>
+            <td class="col-fargate">~70% off</td>
+            <td style="font-size: 12px; color: var(--text-tertiary);">subject to interruption</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- LATENCY BUDGET -->
+  <div id="latency" class="section">
+    <p class="section-label">End-to-end latency — 29-second hard wall (API Gateway timeout)</p>
+
+    <div class="glass" style="padding: 2rem; margin-bottom: 1.5rem;">
+      <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 1.5rem;">Each segment width = proportion of 29-second budget. Red line = API Gateway cutoff.</p>
+
+      <div class="timeline">
+
+        <div class="tl-row">
+          <div class="tl-label" style="font-size: 12px; color: var(--text-tertiary); font-weight: 500;">LAMBDA PATH</div>
+          <div class="tl-track"></div>
+          <div class="tl-total"></div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-label">Cold start (Lambda)</div>
+          <div class="tl-track">
+            <div class="tl-seg" style="left:0; width:7%; background:rgba(10,132,255,0.18); color:var(--blue); border:0.5px solid rgba(10,132,255,0.3);">1.5s</div>
+            <div class="tl-hard"></div>
+          </div>
+          <div class="tl-total">1.5s</div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-label">Tenant validation (Aurora)</div>
+          <div class="tl-track">
+            <div class="tl-seg" style="left:0; width:7%; background:rgba(10,132,255,0.18); color:var(--blue); border:0.5px solid rgba(10,132,255,0.3);">0.5s</div>
+            <div class="tl-hard"></div>
+          </div>
+          <div class="tl-total">0.5s</div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-label">AgentCore classify + route</div>
+          <div class="tl-track">
+            <div class="tl-seg" style="left:0; width:5%; background:rgba(10,132,255,0.18); color:var(--blue); border:0.5px solid rgba(10,132,255,0.3);">0.4s</div>
+            <div class="tl-hard"></div>
+          </div>
+          <div class="tl-total">0.4s</div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-label">Titan embed + OSS search</div>
+          <div class="tl-track">
+            <div class="tl-seg" style="left:0; width:17%; background:rgba(10,132,255,0.18); color:var(--blue); border:0.5px solid rgba(10,132,255,0.3);">1.5s</div>
+            <div class="tl-hard"></div>
+          </div>
+          <div class="tl-total">1.5s</div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-label">Bedrock inference (Sonnet)</div>
+          <div class="tl-track">
+            <div class="tl-seg" style="left:0; width:69%; background:rgba(10,132,255,0.12); color:var(--blue); border:0.5px solid rgba(10,132,255,0.2);">20s</div>
+            <div class="tl-hard"></div>
+          </div>
+          <div class="tl-total">20s</div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-label">Guardrails validation</div>
+          <div class="tl-track">
+            <div class="tl-seg" style="left:0; width:10%; background:rgba(10,132,255,0.18); color:var(--blue); border:0.5px solid rgba(10,132,255,0.3);">2s</div>
+            <div class="tl-hard"></div>
+          </div>
+          <div class="tl-total">2s</div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-label" style="font-weight: 500; color: var(--text-primary);">Lambda total</div>
+          <div class="tl-track">
+            <div class="tl-seg" style="left:0; width:89%; background:rgba(50,215,75,0.12); color:var(--teal); border:0.5px solid rgba(50,215,75,0.3); font-weight: 500;">25.9s — 3.1s margin</div>
+            <div class="tl-hard"></div>
+          </div>
+          <div class="tl-total val-green">25.9s</div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-label" style="font-size: 12px; color: var(--text-tertiary); font-weight: 500; margin-top: 1rem;">FARGATE PATH</div>
+          <div class="tl-track" style="margin-top: 1rem;"></div>
+          <div class="tl-total"></div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-label">Cold start (Fargate)</div>
+          <div class="tl-track">
+            <div class="tl-seg" style="left:0; width:69%; background:rgba(255,159,10,0.18); color:var(--amber); border:0.5px solid rgba(255,159,10,0.3);">20s (ECR pull + init)</div>
+            <div class="tl-hard"></div>
+          </div>
+          <div class="tl-total">20s</div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-label">Remaining pipeline</div>
+          <div class="tl-track">
+            <div class="tl-seg" style="left:0; width:86%; background:rgba(255,159,10,0.10); color:var(--amber); border:0.5px solid rgba(255,159,10,0.15);">24.9s</div>
+            <div class="tl-hard"></div>
+          </div>
+          <div class="tl-total">24.9s</div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-label" style="font-weight: 500; color: var(--text-primary);">Fargate total (cold)</div>
+          <div class="tl-track">
+            <div class="tl-seg" style="left:0; width:100%; background:rgba(255,69,58,0.12); color:var(--red); border:0.5px solid rgba(255,69,58,0.3); font-weight: 500;">44.9s → 504 TIMEOUT</div>
+            <div class="tl-hard"></div>
+          </div>
+          <div class="tl-total val-red">44.9s</div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-label" style="font-weight: 500; color: var(--text-primary);">Fargate total (warm)</div>
+          <div class="tl-track">
+            <div class="tl-seg" style="left:0; width:86%; background:rgba(255,159,10,0.12); color:var(--amber); border:0.5px solid rgba(255,159,10,0.25); font-weight: 500;">24.9s — 4.1s margin</div>
+            <div class="tl-hard"></div>
+          </div>
+          <div class="tl-total val-amber">24.9s</div>
+        </div>
+
+      </div>
+      <p style="font-size: 12px; color: var(--text-tertiary); margin-top: 1.5rem;">Bedrock Sonnet inference dominates the budget. Keeping Fargate always-on eliminates the cold start risk, but adds ~$90/month idle cost. Lambda provisioned concurrency achieves similar warm state at ~$11/month.</p>
+    </div>
+
+    <div class="glass" style="padding: 2rem;">
+      <p class="section-label">Bedrock model inference latency (P50)</p>
+      <table class="data-table">
+        <thead>
+          <tr><th>Model</th><th>Avg latency</th><th>Budget remaining after retrieval</th><th>Ask Halo routing</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="col-label">Claude Haiku</td>
+            <td style="color: var(--teal); font-family: 'JetBrains Mono', monospace; font-size: 12px;">5–10 sec</td>
+            <td style="color: var(--teal); font-family: 'JetBrains Mono', monospace; font-size: 12px;">~16 sec buffer</td>
+            <td class="col-note">Simple factual queries</td>
+          </tr>
+          <tr>
+            <td class="col-label">Claude Sonnet</td>
+            <td style="color: var(--blue); font-family: 'JetBrains Mono', monospace; font-size: 12px;">10–20 sec</td>
+            <td style="color: var(--blue); font-family: 'JetBrains Mono', monospace; font-size: 12px;">~6 sec buffer</td>
+            <td class="col-note">Analytical queries</td>
+          </tr>
+          <tr>
+            <td class="col-label">Claude Opus</td>
+            <td style="color: var(--amber); font-family: 'JetBrains Mono', monospace; font-size: 12px;">15–25 sec</td>
+            <td style="color: var(--amber); font-family: 'JetBrains Mono', monospace; font-size: 12px;">~1 sec buffer</td>
+            <td class="col-note">Multi-hop reasoning</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- BY COMPONENT -->
+  <div id="components" class="section">
+    <p class="section-label">Ask Halo architecture — compute decision per component</p>
+
+    <div class="glass" style="padding: 2rem;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>Type</th>
+            <th>Lambda viable</th>
+            <th>Fargate viable</th>
+            <th>Critical constraint</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="col-label">Query Router</td>
+            <td><span class="pill pill-red">Synchronous</span></td>
+            <td><span class="pill pill-green">Yes</span></td>
+            <td><span class="pill pill-amber">Only if always-on</span></td>
+            <td class="col-note">29-sec API GW timeout. Fargate cold start (15–30s) = immediate 504.</td>
+          </tr>
+          <tr>
+            <td class="col-label">Chunk / Embed / Index</td>
+            <td><span class="pill pill-blue">Async batch</span></td>
+            <td><span class="pill pill-green">Yes (≤15 min)</span></td>
+            <td><span class="pill pill-green">Yes</span></td>
+            <td class="col-note">No SLA pressure. Lambda 15-min timeout sufficient for current data volume.</td>
+          </tr>
+          <tr>
+            <td class="col-label">AgentCore (routing logic)</td>
+            <td><span class="pill pill-red">Synchronous</span></td>
+            <td><span class="pill pill-green">Yes (embedded)</span></td>
+            <td><span class="pill pill-amber">Extra network hop</span></td>
+            <td class="col-note">Tokenisation + threshold logic. Negligible compute. Separate Fargate task adds unnecessary latency.</td>
+          </tr>
+          <tr>
+            <td class="col-label">Feedback endpoint</td>
+            <td><span class="pill pill-blue">Async write</span></td>
+            <td><span class="pill pill-green">Yes</span></td>
+            <td><span class="pill pill-green">Yes (if already running)</span></td>
+            <td class="col-note">~20K writes/month. Trivial compute.</td>
+          </tr>
+          <tr>
+            <td class="col-label">Suggested Qs</td>
+            <td><span class="pill pill-red">Synchronous</span></td>
+            <td><span class="pill pill-green">Yes</span></td>
+            <td><span class="pill pill-amber">Only if always-on</span></td>
+            <td class="col-note">DynamoDB lookup. Sub-100ms. Cold Fargate start unacceptable for UI.</td>
+          </tr>
+          <tr>
+            <td class="col-label">Due Diligence reports (Phase 2)</td>
+            <td><span class="pill pill-blue">Long-running</span></td>
+            <td><span class="pill pill-red">No (&gt;15 min limit)</span></td>
+            <td><span class="pill pill-green">Yes</span></td>
+            <td class="col-note">30–60 min generation. Exceeds Lambda timeout. Natural Fargate workload.</td>
+          </tr>
+          <tr>
+            <td class="col-label">Real-time event processor (Phase 2)</td>
+            <td><span class="pill pill-blue">Stateful / 24/7</span></td>
+            <td><span class="pill pill-red">No (stateless)</span></td>
+            <td><span class="pill pill-green">Yes</span></td>
+            <td class="col-note">Persistent WebSocket or streaming connections. Lambda cannot hold state across invocations.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div style="margin-top: 1.5rem;" class="col2">
+      <div class="glass" style="padding: 1.75rem;">
+        <p class="section-label">Lambda hard limits</p>
+        <div class="row"><span class="row-label">Max execution time</span><span class="row-value val-blue">900 sec</span></div>
+        <div class="row"><span class="row-label">Max memory</span><span class="row-value val-blue">10 GB</span></div>
+        <div class="row"><span class="row-label">Ephemeral /tmp storage</span><span class="row-value val-blue">512 MB</span></div>
+        <div class="row"><span class="row-label">Concurrent executions</span><span class="row-value val-blue">1,000 (default)</span></div>
+        <div class="row"><span class="row-label">Deployment package size</span><span class="row-value val-blue">50 MB (zip) / 250 MB (unzipped)</span></div>
+        <div class="row"><span class="row-label">Env variables size</span><span class="row-value val-blue">4 KB total</span></div>
+        <div class="row"><span class="row-label">Layers limit</span><span class="row-value val-blue">5 layers / function</span></div>
+      </div>
+
+      <div class="glass" style="padding: 1.75rem;">
+        <p class="section-label">Fargate hard limits</p>
+        <div class="row"><span class="row-label">Max execution time</span><span class="row-value val-amber">Unlimited</span></div>
+        <div class="row"><span class="row-label">Max vCPU</span><span class="row-value val-amber">16 vCPU / task</span></div>
+        <div class="row"><span class="row-label">Max memory</span><span class="row-value val-amber">120 GB / task</span></div>
+        <div class="row"><span class="row-label">Ephemeral storage</span><span class="row-value val-amber">20 GB (default)</span></div>
+        <div class="row"><span class="row-label">Max tasks per cluster</span><span class="row-value val-amber">5,000</span></div>
+        <div class="row"><span class="row-label">Container image size</span><span class="row-value val-amber">No hard limit</span></div>
+        <div class="row"><span class="row-label">Network mode</span><span class="row-value val-amber">awsvpc only</span></div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <p>Ask Halo · AWS Architecture · Avahi × Halo AI</p>
+    <p>Data as of June 2025 · AWS us-east-1 pricing</p>
+  </footer>
+
+</div>
+
+<script>
+  function switchTab(name) {
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.getElementById(name).classList.add('active');
+    event.target.classList.add('active');
+  }
+</script>
+</body>
+</html>
